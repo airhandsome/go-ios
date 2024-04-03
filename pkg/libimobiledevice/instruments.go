@@ -1,5 +1,7 @@
 package libimobiledevice
 
+import "log"
+
 const (
 	InstrumentsServiceName            = "com.apple.instruments.remoteserver"
 	InstrumentsSecureProxyServiceName = "com.apple.instruments.remoteserver.DVTSecureSocketProxy"
@@ -38,4 +40,20 @@ func (c *InstrumentsClient) Invoke(selector string, args *AuxBuffer, channelCode
 
 func (c *InstrumentsClient) RegisterCallback(obj string, cb func(m DTXMessageResult)) {
 	c.client.RegisterCallback(obj, cb)
+}
+
+func (c *InstrumentsClient) Call(channel, selector string, params ...interface{}) (*DTXMessageResult, error) {
+	id, err := c.RequestChannel(channel)
+	if err != nil {
+		log.Println("request channel error")
+		return nil, err
+	}
+
+	args := NewAuxBuffer()
+	for _, param := range params {
+		if err = args.AppendObject(param); err != nil {
+			return nil, err
+		}
+	}
+	return c.Invoke(selector, args, id, true)
 }

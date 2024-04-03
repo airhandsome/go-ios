@@ -1,39 +1,39 @@
-package test
+package controller
 
 import (
 	"fmt"
 	"github.com/airhandsome/go-ios/service"
+	"log"
 	"os"
 	"os/signal"
 	"path"
-	"testing"
 	"time"
 )
 
 var lockdownSrv service.Lockdown
 
-func setupLockdownSrv(t *testing.T) {
-	setupDevice(t)
+func setupLockdownSrv() {
+	setupDevice("")
 
 	var err error
 	if lockdownSrv, err = dev.LockdownService(); err != nil {
-		t.Fatal(err)
+		log.Fatal(err)
 	}
 }
 
-func Test_lockdown_QueryType(t *testing.T) {
-	setupLockdownSrv(t)
+func Test_lockdown_QueryType() {
+	setupLockdownSrv()
 
 	lockdownType, err := lockdownSrv.QueryType()
 	if err != nil {
-		t.Fatal(err)
+		log.Fatal(err)
 	}
 
-	t.Log(lockdownType.Type)
+	log.Println(lockdownType.Type)
 }
 
-func Test_lockdown_GetValue(t *testing.T) {
-	setupLockdownSrv(t)
+func Test_lockdown_GetValue() {
+	setupLockdownSrv()
 
 	// v, err := dev.GetValue("com.apple.mobile.iTunes", "")
 	// v, err := dev.GetValue("com.apple.mobile.internal", "")
@@ -45,18 +45,18 @@ func Test_lockdown_GetValue(t *testing.T) {
 	// v, err := lockdownSrv.GetValue("com.apple.mobile.battery", "")
 	// v, err := lockdownSrv.GetValue("com.apple.disk_usage", "")
 	if err != nil {
-		t.Fatal(err)
+		log.Fatal(err)
 	}
 
-	t.Log(v)
+	log.Println(v)
 }
 
-func Test_lockdown_SyslogRelayService(t *testing.T) {
-	setupLockdownSrv(t)
+func Test_lockdown_SyslogRelayService() {
+	setupLockdownSrv()
 
 	syslogRelaySrv, err := lockdownSrv.SyslogRelayService()
 	if err != nil {
-		t.Fatal(err)
+		log.Fatal(err)
 	}
 	syslogRelaySrv.Stop()
 
@@ -79,12 +79,12 @@ func Test_lockdown_SyslogRelayService(t *testing.T) {
 	time.Sleep(time.Second)
 }
 
-func Test_lockdown_CrashReportMoverService(t *testing.T) {
-	setupLockdownSrv(t)
+func Test_lockdown_CrashReportMoverService() {
+	setupLockdownSrv()
 
 	crashReportMoverSrv, err := lockdownSrv.CrashReportMoverService()
 	if err != nil {
-		t.Fatal(err)
+		log.Fatal(err)
 	}
 
 	filenames := make([]string, 0, 36)
@@ -93,16 +93,16 @@ func Test_lockdown_CrashReportMoverService(t *testing.T) {
 			cwd = ""
 		}
 		filenames = append(filenames, path.Join(cwd, info.Name()))
-		// fmt.Println(path.Join(cwd, name))
+		// fmlog.Println(path.Join(cwd, name))
 	}
 	err = crashReportMoverSrv.WalkDir(".", fn)
 	if err != nil {
-		t.Fatal(err)
+		log.Fatal(err)
 	}
 
 	for _, n := range filenames {
-		fmt.Println(n)
+		log.Println(n)
 	}
 
-	t.Log(len(filenames))
+	log.Println(len(filenames))
 }

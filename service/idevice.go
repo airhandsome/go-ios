@@ -11,6 +11,11 @@ import (
 	"github.com/airhandsome/go-ios/pkg/nskeyedarchiver"
 )
 
+type Profiler interface {
+	Start() (<-chan string, error)
+	Stop()
+}
+
 type Usbmux interface {
 	Devices() ([]Device, error)
 	ReadBUID() (string, error)
@@ -25,7 +30,7 @@ type Device interface {
 	SavePairRecord(pairRecord *PairRecord) (err error)
 	DeletePairRecord() (err error)
 
-	lockdownService() (lockdown Lockdown, err error)
+	LockdownService() (lockdown Lockdown, err error)
 	QueryType() (LockdownType, error)
 	GetValue(domain, key string) (v interface{}, err error)
 	Pair() (pairRecord *PairRecord, err error)
@@ -51,7 +56,7 @@ type Device interface {
 	AppRunningProcesses() (processes []Process, err error)
 	AppList(opts ...AppListOption) (apps []Application, err error)
 	DeviceInfo() (devInfo *DeviceInfo, err error)
-
+	GraphicInfo() (graphicInfo *GraphicsInfo, err error)
 	AfcService() (afc Afc, err error)
 	AppInstall(ipaPath string) (err error)
 	AppUninstall(bundleID string) (err error)
@@ -77,6 +82,12 @@ type Device interface {
 	springBoardService() (springBoard SpringBoard, err error)
 	GetIconPNGData(bundleId string) (raw *bytes.Buffer, err error)
 	GetInterfaceOrientation() (orientation OrientationState, err error)
+
+	GetBatteryInfo() (map[string]interface{}, error)
+	ProfilerStart(perfs []DataType, bundleId string) (data <-chan string, err error)
+	ProfilerStop()
+
+	GetPidByBundleId(bundleId string) (int, error)
 }
 
 type DeviceProperties = libimobiledevice.DeviceProperties
@@ -142,7 +153,7 @@ type Instruments interface {
 	AppRunningProcesses() (processes []Process, err error)
 	AppList(opts ...AppListOption) (apps []Application, err error)
 	DeviceInfo() (devInfo *DeviceInfo, err error)
-
+	GraphicInfo() (devInfo *GraphicsInfo, err error)
 	appProcess(bundleID string) (err error)
 	startObserving(pid int) (err error)
 
@@ -151,8 +162,25 @@ type Instruments interface {
 
 	// sysMonSetConfig(cfg ...interface{}) (err error)
 	// SysMonStart(cfg ...interface{}) (_ interface{}, err error)
-
+	call(channel, selector string, auxiliaries ...interface{}) (result *libimobiledevice.DTXMessageResult, err error)
 	registerCallback(obj string, cb func(m libimobiledevice.DTXMessageResult))
+
+	//Graphic
+	SetGraphicSampleRate(rate int) (result *libimobiledevice.DTXMessageResult, err error)
+	StartGraphicSample() (result *libimobiledevice.DTXMessageResult, err error)
+	StopGraphicSample() (result *libimobiledevice.DTXMessageResult, err error)
+
+	//CPU
+	SetCpuAndMemorySampleConfig(config map[string]interface{}) (result *libimobiledevice.DTXMessageResult, err error)
+	StartCpuAndMemorySample() (result *libimobiledevice.DTXMessageResult, err error)
+	StopCpuAndMemorySample() (result *libimobiledevice.DTXMessageResult, err error)
+
+	//Network
+	SetNetworkSampleConfig() (result *libimobiledevice.DTXMessageResult, err error)
+	StartNetworkSample() (result *libimobiledevice.DTXMessageResult, err error)
+	StopNetworkSample() (result *libimobiledevice.DTXMessageResult, err error)
+
+	getPidByBundleId(bundleId string) (pid int, err error)
 }
 
 type Testmanagerd interface {
@@ -224,7 +252,7 @@ type DiagnosticsRelay interface {
 
 type CrashReportMover interface {
 	Move(hostDir string, opts ...CrashReportMoverOption) (err error)
-	walkDir(dirname string, fn func(path string, info *AfcFileInfo)) (err error)
+	WalkDir(dirname string, fn func(path string, info *AfcFileInfo)) (err error)
 }
 
 type SpringBoard interface {

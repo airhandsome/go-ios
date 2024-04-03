@@ -103,7 +103,7 @@ func (c *crashReportMover) Move(hostDir string, opts ...CrashReportMoverOption) 
 			return
 		}
 	}
-	if err = c.walkDir(".", fn); err != nil {
+	if err = c.WalkDir(".", fn); err != nil {
 		return err
 	}
 
@@ -137,7 +137,7 @@ func (c *crashReportMover) Move(hostDir string, opts ...CrashReportMoverOption) 
 	return
 }
 
-func (c *crashReportMover) walkDir(dirname string, fn func(path string, info *AfcFileInfo)) (err error) {
+func (c *crashReportMover) WalkDir(dirname string, fn func(path string, info *AfcFileInfo)) (err error) {
 	var names []string
 	if names, err = c.afc.ReadDir(dirname); err != nil {
 		return err
@@ -155,7 +155,7 @@ func (c *crashReportMover) walkDir(dirname string, fn func(path string, info *Af
 			return err
 		}
 		if info.IsDir() {
-			if err = c.walkDir(path.Join(cwd, info.name), fn); err != nil {
+			if err = c.WalkDir(path.Join(cwd, info.name), fn); err != nil {
 				return err
 			}
 		}

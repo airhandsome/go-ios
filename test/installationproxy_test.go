@@ -11,7 +11,7 @@ func setupInstallationProxySrv(t *testing.T) {
 	setupLockdownSrv(t)
 
 	var err error
-	if lockdownSrv, err = dev.lockdownService(); err != nil {
+	if lockdownSrv, err = dev.LockdownService(); err != nil {
 		t.Fatal(err)
 	}
 

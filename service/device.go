@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path"
 	"strings"
@@ -25,6 +26,7 @@ func newDevice(client *libimobiledevice.UsbmuxClient, properties DevicePropertie
 	return &device{
 		umClient:   client,
 		properties: &properties,
+		perf:       map[DataType]Profiler{},
 	}
 }
 
@@ -47,6 +49,7 @@ type device struct {
 	springBoard       SpringBoard
 	crashReportMover  CrashReportMover
 	pcapd             Pcapd
+	perf              map[DataType]Profiler
 }
 
 func (d *device) Properties() DeviceProperties {
@@ -156,7 +159,7 @@ func (d *device) DeletePairRecord() (err error) {
 	return
 }
 
-func (d *device) lockdownService() (lockdown Lockdown, err error) {
+func (d *device) LockdownService() (lockdown Lockdown, err error) {
 	// if d.lockdown != nil {
 	// 	return d.lockdown, nil
 	// }
@@ -173,14 +176,14 @@ func (d *device) lockdownService() (lockdown Lockdown, err error) {
 }
 
 func (d *device) QueryType() (LockdownType, error) {
-	if _, err := d.lockdownService(); err != nil {
+	if _, err := d.LockdownService(); err != nil {
 		return LockdownType{}, err
 	}
 	return d.lockdown.QueryType()
 }
 
 func (d *device) GetValue(domain, key string) (v interface{}, err error) {
-	if _, err = d.lockdownService(); err != nil {
+	if _, err = d.LockdownService(); err != nil {
 		return nil, err
 	}
 	if d.lockdown.pairRecord == nil {
@@ -199,7 +202,7 @@ func (d *device) GetValue(domain, key string) (v interface{}, err error) {
 }
 
 func (d *device) Pair() (pairRecord *PairRecord, err error) {
-	if _, err = d.lockdownService(); err != nil {
+	if _, err = d.LockdownService(); err != nil {
 		return nil, err
 	}
 	return d.lockdown.Pair()
@@ -209,7 +212,7 @@ func (d *device) imageMounterService() (imageMounter ImageMounter, err error) {
 	if d.imageMounter != nil {
 		return d.imageMounter, nil
 	}
-	if _, err = d.lockdownService(); err != nil {
+	if _, err = d.LockdownService(); err != nil {
 		return nil, err
 	}
 	if d.imageMounter, err = d.lockdown.ImageMounterService(); err != nil {
@@ -242,7 +245,7 @@ func (d *device) screenshotService() (screenshot Screenshot, err error) {
 		return d.screenshot, nil
 	}
 
-	if _, err = d.lockdownService(); err != nil {
+	if _, err = d.LockdownService(); err != nil {
 		return nil, err
 	}
 	if d.screenshot, err = d.lockdown.ScreenshotService(); err != nil {
@@ -263,7 +266,7 @@ func (d *device) simulateLocationService() (simulateLocation SimulateLocation, e
 	if d.simulateLocation != nil {
 		return d.simulateLocation, nil
 	}
-	if _, err = d.lockdownService(); err != nil {
+	if _, err = d.LockdownService(); err != nil {
 		return nil, err
 	}
 	if d.simulateLocation, err = d.lockdown.SimulateLocationService(); err != nil {
@@ -291,7 +294,7 @@ func (d *device) installationProxyService() (installationProxy InstallationProxy
 	if d.installationProxy != nil {
 		return d.installationProxy, nil
 	}
-	if _, err = d.lockdownService(); err != nil {
+	if _, err = d.LockdownService(); err != nil {
 		return nil, err
 	}
 	if d.installationProxy, err = d.lockdown.InstallationProxyService(); err != nil {
@@ -319,7 +322,7 @@ func (d *device) instrumentsService() (instruments Instruments, err error) {
 	if d.instruments != nil {
 		return d.instruments, nil
 	}
-	if _, err = d.lockdownService(); err != nil {
+	if _, err = d.LockdownService(); err != nil {
 		return nil, err
 	}
 	if d.instruments, err = d.lockdown.InstrumentsService(); err != nil {
@@ -364,8 +367,15 @@ func (d *device) DeviceInfo() (devInfo *DeviceInfo, err error) {
 	return d.instruments.DeviceInfo()
 }
 
+func (d *device) GraphicInfo() (graphicInfo *GraphicsInfo, err error) {
+	if _, err = d.instrumentsService(); err != nil {
+		return nil, err
+	}
+	return d.instruments.GraphicInfo()
+}
+
 func (d *device) testmanagerdService() (testmanagerd Testmanagerd, err error) {
-	if _, err = d.lockdownService(); err != nil {
+	if _, err = d.LockdownService(); err != nil {
 		return nil, err
 	}
 	if testmanagerd, err = d.lockdown.TestmanagerdService(); err != nil {
@@ -378,7 +388,7 @@ func (d *device) AfcService() (afc Afc, err error) {
 	if d.afc != nil {
 		return d.afc, nil
 	}
-	if _, err = d.lockdownService(); err != nil {
+	if _, err = d.LockdownService(); err != nil {
 		return nil, err
 	}
 	if d.afc, err = d.lockdown.AfcService(); err != nil {
@@ -441,7 +451,7 @@ func (d *device) HouseArrestService() (houseArrest HouseArrest, err error) {
 	if d.houseArrest != nil {
 		return d.houseArrest, nil
 	}
-	if _, err = d.lockdownService(); err != nil {
+	if _, err = d.LockdownService(); err != nil {
 		return nil, err
 	}
 	if d.houseArrest, err = d.lockdown.HouseArrestService(); err != nil {
@@ -455,7 +465,7 @@ func (d *device) syslogRelayService() (syslogRelay SyslogRelay, err error) {
 	if d.syslogRelay != nil {
 		return d.syslogRelay, nil
 	}
-	if _, err = d.lockdownService(); err != nil {
+	if _, err = d.LockdownService(); err != nil {
 		return nil, err
 	}
 	if d.syslogRelay, err = d.lockdown.SyslogRelayService(); err != nil {
@@ -480,7 +490,7 @@ func (d *device) SyslogStop() {
 }
 
 func (d *device) Reboot() (err error) {
-	if _, err = d.lockdownService(); err != nil {
+	if _, err = d.LockdownService(); err != nil {
 		return
 	}
 	if d.diagnosticsRelay, err = d.lockdown.DiagnosticsRelayService(); err != nil {
@@ -493,7 +503,7 @@ func (d *device) Reboot() (err error) {
 }
 
 func (d *device) Shutdown() (err error) {
-	if _, err = d.lockdownService(); err != nil {
+	if _, err = d.LockdownService(); err != nil {
 		return
 	}
 	if d.diagnosticsRelay, err = d.lockdown.DiagnosticsRelayService(); err != nil {
@@ -509,7 +519,7 @@ func (d *device) springBoardService() (springBoard SpringBoard, err error) {
 	if d.springBoard != nil {
 		return d.springBoard, nil
 	}
-	if _, err = d.lockdownService(); err != nil {
+	if _, err = d.LockdownService(); err != nil {
 		return nil, err
 	}
 	if d.springBoard, err = d.lockdown.SpringBoardService(); err != nil {
@@ -520,7 +530,7 @@ func (d *device) springBoardService() (springBoard SpringBoard, err error) {
 }
 
 func (d *device) GetIconPNGData(bundleId string) (raw *bytes.Buffer, err error) {
-	if _, err = d.lockdownService(); err != nil {
+	if _, err = d.LockdownService(); err != nil {
 		return
 	}
 	if d.springBoard, err = d.lockdown.SpringBoardService(); err != nil {
@@ -546,7 +556,7 @@ func (d *device) PcapdService() (pcapd Pcapd, err error) {
 	// if d.pcapd != nil {
 	// 	return d.pcapd, nil
 	// }
-	if _, err = d.lockdownService(); err != nil {
+	if _, err = d.LockdownService(); err != nil {
 		return nil, err
 	}
 	if d.pcapd, err = d.lockdown.PcapdService(); err != nil {
@@ -574,7 +584,7 @@ func (d *device) crashReportMoverService() (crashReportMover CrashReportMover, e
 	if d.crashReportMover != nil {
 		return d.crashReportMover, nil
 	}
-	if _, err = d.lockdownService(); err != nil {
+	if _, err = d.LockdownService(); err != nil {
 		return nil, err
 	}
 	if d.crashReportMover, err = d.lockdown.CrashReportMoverService(); err != nil {
@@ -836,4 +846,105 @@ func (d *device) _uploadXCTestConfiguration(bundleID string, sessionId uuid.UUID
 	}
 
 	return
+}
+
+func (d *device) GetBatteryInfo() (map[string]interface{}, error) {
+	v, err := d.GetValue("com.apple.mobile.battery", "")
+	if err != nil {
+		return nil, err
+	}
+	if info, ok := v.(map[string]interface{}); ok {
+		return info, nil
+	}
+	return nil, err
+}
+
+func (d *device) ProfilerStart(perfs []DataType, bundleId string) (<-chan string, error) {
+	outData := make(chan string, 10)
+	var pid = -1
+	if bundleId != "" {
+		for pid >= 0 {
+			pid, err := d.instruments.getPidByBundleId(bundleId)
+			if err != nil {
+				log.Printf("get pid by bundleId %s error \n", bundleId)
+				return nil, err
+			}
+			//process has not started yet, call start to get pid
+			if pid == -1 {
+				pid, err = d.instruments.AppLaunch(bundleId)
+				if err != nil {
+					log.Printf("start app by bundleId %s error \n", bundleId)
+					return nil, err
+				}
+			}
+		}
+	}
+
+	typeMap := map[DataType]bool{}
+	for _, perf := range perfs {
+		typeMap[perf] = true
+	}
+
+	if typeMap[FPS] {
+		profiler, err := d.NewGraphicProfiler()
+		if err != nil {
+			return nil, err
+		}
+		fpsData, err := profiler.Start()
+		go func() {
+			for {
+				outData <- <-fpsData
+				fmt.Println(outData)
+			}
+		}()
+		d.perf[FPS] = profiler
+	}
+
+	//seems it is useless, get the whole device network
+	if typeMap[NETWORK] {
+		profiler, err := d.NewNetworkProfiler()
+		if err != nil {
+			return nil, err
+		}
+		networkData, err := profiler.Start()
+		go func() {
+			for {
+				outData <- <-networkData
+				fmt.Println(outData)
+			}
+		}()
+		d.perf[NETWORK] = profiler
+	}
+
+	if typeMap[CPU] || typeMap[MEMORY] || typeMap[NETWORK] || typeMap[DISK] {
+		profiler, err := d.NewCpuAndMemoryProfiler()
+		if err != nil {
+			return nil, err
+		}
+		cpuData, err := profiler.Start()
+		go func() {
+			for {
+				outData <- <-cpuData
+				fmt.Println(outData)
+			}
+		}()
+		d.perf[NETWORK] = profiler
+
+	}
+
+	return outData, nil
+}
+func (d *device) ProfilerStop() {
+	for _, v := range d.perf {
+		v.Stop()
+	}
+}
+
+func (d *device) GetPidByBundleId(bundleId string) (int, error) {
+	var err error
+	d.instruments, err = d.instrumentsService()
+	if err != nil {
+		return -1, err
+	}
+	return d.instruments.getPidByBundleId(bundleId)
 }
