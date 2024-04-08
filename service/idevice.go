@@ -248,6 +248,7 @@ type Pcapd interface {
 type DiagnosticsRelay interface {
 	Reboot() error
 	Shutdown() error
+	PowerSource() (powerInfo map[string]interface{}, err error)
 }
 
 type CrashReportMover interface {

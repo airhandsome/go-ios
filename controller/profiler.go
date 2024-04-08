@@ -17,6 +17,7 @@ func ProfilerStart(udid, bundleId string, options []service.DataType) {
 	for {
 		select {
 		case <-timer.C:
+			ProfilerStop()
 			break
 		case d := <-data:
 			fmt.Println(d)

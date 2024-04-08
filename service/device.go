@@ -3,11 +3,14 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"os"
 	"path"
+	"reflect"
+	"strconv"
 	"strings"
 	"time"
 
@@ -26,7 +29,7 @@ func newDevice(client *libimobiledevice.UsbmuxClient, properties DevicePropertie
 	return &device{
 		umClient:   client,
 		properties: &properties,
-		perf:       map[DataType]Profiler{},
+		profiler:   map[DataType]Profiler{},
 	}
 }
 
@@ -49,7 +52,7 @@ type device struct {
 	springBoard       SpringBoard
 	crashReportMover  CrashReportMover
 	pcapd             Pcapd
-	perf              map[DataType]Profiler
+	profiler          map[DataType]Profiler
 }
 
 func (d *device) Properties() DeviceProperties {
@@ -853,9 +856,43 @@ func (d *device) GetBatteryInfo() (map[string]interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	if info, ok := v.(map[string]interface{}); ok {
+	var info map[string]interface{}
+	var ok bool
+	if info, ok = v.(map[string]interface{}); !ok {
+		info = map[string]interface{}{}
+	}
+
+	if _, err = d.LockdownService(); err != nil {
+		return info, err
+	}
+	if d.diagnosticsRelay, err = d.lockdown.DiagnosticsRelayService(); err != nil {
+		return info, err
+	}
+	if powerInfo, err := d.diagnosticsRelay.PowerSource(); err != nil {
+		return info, err
+	} else {
+		if powerInfo["Status"] == "Success" {
+			if diagnostics, ok := powerInfo["Diagnostics"].(map[string]interface{}); ok {
+				if ioRegistry, ok := diagnostics["IORegistry"].(map[string]interface{}); ok {
+					battery, err := parseBatteryData(ioRegistry)
+					if err != nil {
+						log.Println("parse battery data error")
+						return info, err
+					}
+					value := reflect.ValueOf(*battery)
+					typeOfObj := value.Type()
+					for i := 0; i < value.NumField(); i++ {
+						fieldName := typeOfObj.Field(i).Name
+						fieldValue := value.Field(i).Interface()
+						info[fieldName] = fieldValue
+					}
+				}
+			}
+
+		}
 		return info, nil
 	}
+
 	return nil, err
 }
 
@@ -893,11 +930,12 @@ func (d *device) ProfilerStart(perfs []DataType, bundleId string) (<-chan string
 		fpsData, err := profiler.Start()
 		go func() {
 			for {
-				outData <- <-fpsData
-				fmt.Println(outData)
+				data := <-fpsData
+				outData <- data
+				fmt.Println("Fps" + data)
 			}
 		}()
-		d.perf[FPS] = profiler
+		d.profiler[FPS] = profiler
 	}
 
 	//seems it is useless, get the whole device network
@@ -909,33 +947,41 @@ func (d *device) ProfilerStart(perfs []DataType, bundleId string) (<-chan string
 		networkData, err := profiler.Start()
 		go func() {
 			for {
-				outData <- <-networkData
-				fmt.Println(outData)
+				data := <-networkData
+				outData <- data
+				fmt.Println("network" + data)
 			}
 		}()
-		d.perf[NETWORK] = profiler
+		d.profiler[NETWORK] = profiler
 	}
 
 	if typeMap[CPU] || typeMap[MEMORY] || typeMap[NETWORK] || typeMap[DISK] {
 		profiler, err := d.NewCpuAndMemoryProfiler()
+		var param []string
+		for k := range typeMap {
+			param = append(param, string(k))
+		}
+		profiler.config = profiler.GenerateDefaultConfig(pid, param...)
+
 		if err != nil {
 			return nil, err
 		}
 		cpuData, err := profiler.Start()
 		go func() {
 			for {
-				outData <- <-cpuData
-				fmt.Println(outData)
+				data := <-cpuData
+				outData <- data
+				fmt.Println("cpu" + data)
 			}
 		}()
-		d.perf[NETWORK] = profiler
+		d.profiler[CPU] = profiler
 
 	}
 
 	return outData, nil
 }
 func (d *device) ProfilerStop() {
-	for _, v := range d.perf {
+	for _, v := range d.profiler {
 		v.Stop()
 	}
 }
@@ -947,4 +993,284 @@ func (d *device) GetPidByBundleId(bundleId string) (int, error) {
 		return -1, err
 	}
 	return d.instruments.getPidByBundleId(bundleId)
+}
+
+type BatteryInfo struct {
+	Serial                string  `json:"Serial,omitempty"`
+	CurrentCapacity       float64 `json:"CurrentCapacity,omitempty"`
+	CycleCount            int     `json:"CycleCount"`
+	AbsoluteCapacity      float64 `json:"AbsoluteCapacity"`
+	NominalChargeCapacity float64 `json:"NominalChargeCapacity"`
+	DesignCapacity        float64 `json:"DesignCapacity"`
+	Voltage               float64 `json:"Voltage"`
+	BootVoltage           float64 `json:"BootVoltage"`
+	AdapterDetailsVoltage uint64  `json:"AdapterDetailsVoltage,omitempty"`
+	AdapterDetailsWatts   uint64  `json:"AdapterDetailsWatts,omitempty"`
+	InstantAmperage       float64 `json:"InstantAmperage"`
+	Temperature           float64 `json:"Temperature"`
+}
+
+func parseBatteryData(batteryData map[string]interface{}) (*BatteryInfo, error) {
+	adapterDetailsData, ok := batteryData["AdapterDetails"].(map[string]interface{})
+	if !ok {
+		return nil, errors.New("failed to cast AdapterDetails data to map")
+	}
+
+	battery := &BatteryInfo{}
+	battery.AdapterDetailsVoltage = adapterDetailsData["Voltage"].(uint64)
+	battery.AdapterDetailsWatts = adapterDetailsData["Watts"].(uint64)
+
+	// Use a defer statement to handle any unmarshalling errors.
+	defer func() {
+		if r := recover(); r != nil {
+			err := fmt.Errorf("failed to unmarshal IORegistry data: %v", r)
+			fmt.Println(err)
+		}
+	}()
+
+	// Unmarshal the IORegistry data directly into the Battery struct.
+	registryDataBytes, err := json.Marshal(batteryData)
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(registryDataBytes, battery); err != nil {
+		return nil, err
+	}
+
+	return battery, nil
+}
+
+func (c *CpuAndMemoryProfiler) parseProcessData(dataArray []interface{}) {
+	/**
+	dataArray example:
+	[
+	  map[
+	    CPUCount:2
+	    EnabledCPUs:2
+	    PerCPUUsage:[
+	      map[CPU_NiceLoad:0 CPU_SystemLoad:-1 CPU_TotalLoad:3.6363636363636402 CPU_UserLoad:-1]
+	      map[CPU_NiceLoad:0 CPU_SystemLoad:-1 CPU_TotalLoad:2.7272727272727195 CPU_UserLoad:-1]
+	    ]
+	    System:[36408520704 6897049600 3031160 773697 15596 61940 1297 26942 588 17020 127346 1835008 119718056 107009899 174046 103548]
+	    SystemCPUUsage:map[CPU_NiceLoad:0 CPU_SystemLoad:-1 CPU_TotalLoad:6.36363636363636 CPU_UserLoad:-1]
+	    StartMachAbsTime:5896602132889
+	    EndMachAbsTime:5896628486761
+	    Type:41
+	 ]
+	 map[
+	   Processes:map[
+	     0:[1.3582834340402803 0]
+	     124:[0.011456702068519481 124]
+	     136:[0.05468332721703649 136]
+	   ]
+	   StartMachAbsTime:5896602295095
+	   EndMachAbsTime:5896628780514
+	   Type:5
+	  ]
+	]
+	*/
+
+	processData := make(map[string]interface{})
+	processData["type"] = "process"
+	processData["timestamp"] = time.Now().Unix()
+	processData["pid"] = c.pid
+
+	defer func() {
+		processBytes, _ := json.Marshal(processData)
+		c.chanProcess <- processBytes
+	}()
+
+	systemInfo := dataArray[0].(map[string]interface{})
+	processInfo := dataArray[1].(map[string]interface{})
+	if _, ok := systemInfo["System"]; !ok {
+		systemInfo, processInfo = processInfo, systemInfo
+	}
+
+	var targetProcessValue []interface{}
+	processList := processInfo["Processes"].(map[string]interface{})
+	for pid, v := range processList {
+		if pid != strconv.Itoa(c.pid) {
+			continue
+		}
+		targetProcessValue = v.([]interface{})
+	}
+
+	if targetProcessValue == nil {
+		processData["msg"] = fmt.Sprintf("process %d not found", c.pid)
+		return
+	}
+
+	processAttributesMap := make(map[string]interface{})
+	for idx, value := range c.options.ProcessAttributes {
+		processAttributesMap[value] = targetProcessValue[idx]
+	}
+	processData["proc_perf"] = processAttributesMap
+	//
+	//systemAttributesValue := systemInfo["System"].([]interface{})
+	//systemAttributesMap := make(map[string]int64)
+	//for idx, value := range c.options.SystemAttributes {
+	//	systemAttributesMap[value] = convert2Int64(systemAttributesValue[idx])
+	//}
+	//processData["sys_perf"] = systemAttributesMap
+}
+
+func (c *CpuAndMemoryProfiler) parseSystemData(dataArray []interface{}) {
+	timestamp := time.Now().Unix()
+	var systemInfo map[string]interface{}
+
+	var dataTime uint64 = 0
+	for _, value := range dataArray {
+		t, ok := value.(map[string]interface{})
+		if ok && t["SystemCPUUsage"] != nil && t["EndMachAbsTime"] != nil && t["EndMachAbsTime"].(uint64) > dataTime {
+			systemInfo = t
+			dataTime = t["EndMachAbsTime"].(uint64)
+		}
+	}
+
+	/**
+	systemInfo example:
+	map[
+	  CPUCount:2
+	  EnabledCPUs:2
+	  PerCPUUsage:[
+	    map[CPU_NiceLoad:0 CPU_SystemLoad:-1 CPU_TotalLoad:3.9215686274509807 CPU_UserLoad:-1]
+	    map[CPU_NiceLoad:0 CPU_SystemLoad:-1 CPU_TotalLoad:11.650485436893206 CPU_UserLoad:-1]]
+	  ]
+	  System:[704211 35486281728 6303789056 3001119 1001 11033 52668 1740 40022 2114 17310 126903 1835008 160323 107909856 95067 95808179]
+	  SystemCPUUsage:map[
+	    CPU_NiceLoad:0
+	    CPU_SystemLoad:-1
+	    CPU_TotalLoad:15.572054064344186
+	    CPU_UserLoad:-1
+	  ]
+	  StartMachAbsTime:5339240248449
+	  EndMachAbsTime:5339264441260
+	  Type:41
+	]
+	*/
+
+	if c.options.SysCPU {
+		sysCPUUsage := systemInfo["SystemCPUUsage"].(map[string]interface{})
+		sysCPUInfo := SystemCPUData{
+			PerfDataBase: PerfDataBase{
+				Type:      "sys_cpu",
+				TimeStamp: timestamp,
+			},
+			NiceLoad:   sysCPUUsage["CPU_NiceLoad"].(float64),
+			SystemLoad: sysCPUUsage["CPU_SystemLoad"].(float64),
+			TotalLoad:  sysCPUUsage["CPU_TotalLoad"].(float64),
+			UserLoad:   sysCPUUsage["CPU_UserLoad"].(float64),
+		}
+		cpuBytes, _ := json.Marshal(sysCPUInfo)
+		c.chanSysCPU <- cpuBytes
+	}
+
+	systemAttributesValue := systemInfo["System"].([]interface{})
+	systemAttributesMap := make(map[string]int64)
+	for idx, value := range c.options.SystemAttributes {
+		systemAttributesMap[value] = convert2Int64(systemAttributesValue[idx])
+	}
+
+	if c.options.SysMem {
+		kernelPageSize := int64(16384) // core_profile_session_tap get kernel_page_size
+		// kernelPageSize := int64(1) // why 16384 ?
+		appMemory := (systemAttributesMap["vmIntPageCount"] - systemAttributesMap["vmPurgeableCount"]) * kernelPageSize
+		cachedFiles := (systemAttributesMap["vmExtPageCount"] + systemAttributesMap["vmPurgeableCount"]) * kernelPageSize
+		compressed := systemAttributesMap["vmCompressorPageCount"] * kernelPageSize
+		usedMemory := (systemAttributesMap["vmUsedCount"] - systemAttributesMap["vmExtPageCount"]) * kernelPageSize
+		wiredMemory := systemAttributesMap["vmWireCount"] * kernelPageSize
+		swapUsed := systemAttributesMap["__vmSwapUsage"]
+		freeMemory := systemAttributesMap["vmFreeCount"] * kernelPageSize
+
+		sysMemInfo := SystemMemData{
+			PerfDataBase: PerfDataBase{
+				Type:      "sys_mem",
+				TimeStamp: timestamp,
+			},
+			AppMemory:   appMemory,
+			UsedMemory:  usedMemory,
+			WiredMemory: wiredMemory,
+			FreeMemory:  freeMemory,
+			CachedFiles: cachedFiles,
+			Compressed:  compressed,
+			SwapUsed:    swapUsed,
+		}
+		memBytes, _ := json.Marshal(sysMemInfo)
+		c.chanSysMem <- memBytes
+	}
+
+	if c.options.SysDisk {
+		diskBytesRead := systemAttributesMap["diskBytesRead"]
+		diskBytesWritten := systemAttributesMap["diskBytesWritten"]
+		diskReadOps := systemAttributesMap["diskReadOps"]
+		diskWriteOps := systemAttributesMap["diskWriteOps"]
+
+		sysDiskInfo := SystemDiskData{
+			PerfDataBase: PerfDataBase{
+				Type:      "sys_disk",
+				TimeStamp: timestamp,
+			},
+			DataRead:    diskBytesRead,
+			DataWritten: diskBytesWritten,
+			ReadOps:     diskReadOps,
+			WriteOps:    diskWriteOps,
+		}
+		diskBytes, _ := json.Marshal(sysDiskInfo)
+		c.chanSysDisk <- diskBytes
+	}
+
+	if c.options.SysNetwork {
+		netBytesIn := systemAttributesMap["netBytesIn"]
+		netBytesOut := systemAttributesMap["netBytesOut"]
+		netPacketsIn := systemAttributesMap["netPacketsIn"]
+		netPacketsOut := systemAttributesMap["netPacketsOut"]
+
+		sysNetworkInfo := SystemNetworkData{
+			PerfDataBase: PerfDataBase{
+				Type:      "sys_network",
+				TimeStamp: timestamp,
+			},
+			BytesIn:    netBytesIn,
+			BytesOut:   netBytesOut,
+			PacketsIn:  netPacketsIn,
+			PacketsOut: netPacketsOut,
+		}
+		networkBytes, _ := json.Marshal(sysNetworkInfo)
+		c.chanSysNetwork <- networkBytes
+	}
+}
+
+type SystemCPUData struct {
+	PerfDataBase         // system cpu
+	NiceLoad     float64 `json:"nice_load"`
+	SystemLoad   float64 `json:"system_load"`
+	TotalLoad    float64 `json:"total_load"`
+	UserLoad     float64 `json:"user_load"`
+}
+
+type SystemMemData struct {
+	PerfDataBase       // mem
+	AppMemory    int64 `json:"app_memory"`
+	FreeMemory   int64 `json:"free_memory"`
+	UsedMemory   int64 `json:"used_memory"`
+	WiredMemory  int64 `json:"wired_memory"`
+	CachedFiles  int64 `json:"cached_files"`
+	Compressed   int64 `json:"compressed"`
+	SwapUsed     int64 `json:"swap_used"`
+}
+
+type SystemDiskData struct {
+	PerfDataBase       // disk
+	DataRead     int64 `json:"data_read"`
+	DataWritten  int64 `json:"data_written"`
+	ReadOps      int64 `json:"reads_in"`
+	WriteOps     int64 `json:"writes_out"`
+}
+
+type SystemNetworkData struct {
+	PerfDataBase       // network
+	BytesIn      int64 `json:"bytes_in"`
+	BytesOut     int64 `json:"bytes_out"`
+	PacketsIn    int64 `json:"packets_in"`
+	PacketsOut   int64 `json:"packets_out"`
 }

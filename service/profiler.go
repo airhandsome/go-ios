@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"github.com/airhandsome/go-ios/pkg/libimobiledevice"
 	"log"
 	"time"
@@ -25,7 +24,9 @@ const (
 type CpuAndMemoryProfiler struct {
 	ins    Instruments
 	ctx    context.Context
+	config map[string]interface{}
 	cancel context.CancelFunc
+	pid    int
 }
 
 type NetworkProfiler struct {
@@ -157,23 +158,7 @@ func (d *device) NewCpuAndMemoryProfiler() (*CpuAndMemoryProfiler, error) {
 	}, nil
 }
 
-func (p *CpuAndMemoryProfiler) GetNetworkConfig() []string {
-	return []string{ // network
-		"netBytesIn",
-		"netBytesOut",
-		"netPacketsIn",
-		"netPacketsOut"}
-}
-
-func (p *CpuAndMemoryProfiler) GetDiskConfig() []string {
-	return []string{ // disk
-		"diskBytesRead",
-		"diskBytesWritten",
-		"diskReadOps",
-		"diskWriteOps"}
-}
-
-func (p *CpuAndMemoryProfiler) Start() (<-chan string, error) {
+func (p *CpuAndMemoryProfiler) GenerateDefaultConfig(pid int, options ...string) map[string]interface{} {
 	/*
 	 config = {
 	            "bm": 0,
@@ -191,29 +176,86 @@ func (p *CpuAndMemoryProfiler) Start() (<-chan string, error) {
 	        }
 	*/
 	config := map[string]interface{}{
-		"bm":       0,
-		"cpuUsage": true,
-		"procAttrs": []string{
-			"memVirtualSize", "cpuUsage", "ctxSwitch", "intWakeups",
-			"physFootprint", "memResidentSize", "memAnon", "pid"},
-		"sampleInterval": time.Second, // 1e9 ns == 1s
-		"sysAttrs": []string{
-			"vmCompressorPageCount",
-			"vmExtPageCount",
-			"vmFreeCount",
-			"vmIntPageCount",
-			"vmPurgeableCount",
-			"vmWireCount",
-			"vmUsedCount",
-			"__vmSwapUsage",
-			"physMemSize"},
-		//"sysAttrs": []string{
-		//	"vmExtPageCount", "vmFreeCount", "vmPurgeableCount",
-		//	"vmSpeculativeCount", "physMemSize"},
-		"ur": 1000,
+		"bm":             0,
+		"cpuUsage":       true,
+		"sampleInterval": time.Second, // 1e9 ns == 1s sample frequency, default 1 second
+		"ur":             1000,        // output frequency
 	}
+	var sysAttrs []string
+	var procAttrs []string
+	if pid >= 0 {
+		procAttrs = append(procAttrs, "pid")
+	}
+	for _, option := range options {
+		if option == "disk" {
+			sysAttrs = append(sysAttrs, p.GetDiskConfig()...)
+		} else if option == "network" {
+			sysAttrs = append(sysAttrs, p.GetNetworkConfig()...)
+		} else if option == "cpu" && pid >= 0 {
 
-	_, err := p.ins.SetCpuAndMemorySampleConfig(config)
+			procAttrs = append(procAttrs, p.GetCpuConfig()...)
+		} else if option == "memory" {
+			sysAttrs = append(sysAttrs, p.GetMemoryConfig()...)
+			if pid >= 0 {
+				procAttrs = append(procAttrs, p.GetMemoryProcessConfig()...)
+			}
+		}
+	}
+	config["procAttrs"] = procAttrs
+	config["sysAttrs"] = sysAttrs
+	return config
+}
+
+func (p *CpuAndMemoryProfiler) GetNetworkConfig() []string {
+	return []string{ // network
+		"netBytesIn",
+		"netBytesOut",
+		"netPacketsIn",
+		"netPacketsOut"}
+}
+
+func (p *CpuAndMemoryProfiler) GetDiskConfig() []string {
+	return []string{ // disk
+		"diskBytesRead",
+		"diskBytesWritten",
+		"diskReadOps",
+		"diskWriteOps"}
+}
+func (p *CpuAndMemoryProfiler) GetCpuConfig() []string {
+	return []string{
+		"cpuUsage",
+		"ctxSwitch",
+		"intWakeups",
+		"physFootprint",
+	}
+}
+
+func (p *CpuAndMemoryProfiler) GetMemoryConfig() []string {
+	return []string{
+		"vmCompressorPageCount",
+		"vmExtPageCount",
+		"vmFreeCount",
+		"vmIntPageCount",
+		"vmPurgeableCount",
+		"vmWireCount",
+		"vmUsedCount",
+		"vmSpeculativeCount",
+		"__vmSwapUsage",
+		"physMemSize",
+	}
+}
+
+func (p *CpuAndMemoryProfiler) GetMemoryProcessConfig() []string {
+	return []string{
+		"memVirtualSize",
+		"memResidentSize",
+		"memAnon",
+	}
+}
+
+func (p *CpuAndMemoryProfiler) Start() (<-chan string, error) {
+
+	_, err := p.ins.SetCpuAndMemorySampleConfig(p.config)
 	if err != nil {
 		return nil, err
 	}
@@ -236,8 +278,14 @@ func (p *CpuAndMemoryProfiler) Start() (<-chan string, error) {
 			if !ok || len(dataArray) < 2 {
 				return
 			}
-			res := fmt.Sprintf("%v", dataArray)
-			outCh <- res
+			for _, data := range dataArray {
+				dataStr, err := json.Marshal(data)
+				if err != nil {
+					log.Println("marshal perf data error")
+					continue
+				}
+				outCh <- string(dataStr)
+			}
 			//if p.options.Pid != 0 {
 			//	c.parseProcessData(dataArray)
 			//	c.parseSystemData(dataArray)
@@ -261,4 +309,8 @@ type PerfDataBase struct {
 	Type      string `json:"type"`
 	TimeStamp int64  `json:"timestamp"`
 	Msg       string `json:"msg,omitempty"` // message for invalid data
+}
+
+func ParseSystemData(array []interface{}) {
+
 }

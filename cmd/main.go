@@ -42,7 +42,7 @@ func main() {
 		Run: func(cmd *cobra.Command, args []string) {
 			info := controller.GetDeviceInfo(udid)
 			if info != nil {
-				fmt.Printf("%+v", info)
+				fmt.Printf("%+v", *info)
 			}
 		},
 	}
@@ -65,7 +65,10 @@ func main() {
 		Short: "Command related to app",
 		Long:  `Command related to app`,
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Printf("App list command run\n")
+			fmt.Printf("Please select app detail function\n" +
+				"-h   help\n" +
+				"list list all available bundleId\n" +
+				"launch -n bundleId    launch application with refered bundleId\n")
 		},
 	}
 
@@ -90,8 +93,7 @@ func main() {
 		Short: "Get perf data",
 		Long:  "Get perf data",
 		Run: func(cmd *cobra.Command, args []string) {
-			//todo
-			fmt.Printf("\"Get battery data\"\n")
+			controller.ProfilerStart(udid, bundleId, []service.DataType{service.CPU, service.MEMORY, service.DISK, service.NETWORK})
 		},
 	}
 

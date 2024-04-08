@@ -27,18 +27,16 @@ func setupScreenshotSrv() {
 }
 
 func Screenshot(name string) bool {
-	data, _ := dev.Screenshot()
-	fmt.Println(data)
-
 	setupScreenshotSrv()
+	raw, _ := dev.Screenshot()
 
 	// raw, err := dev.Screenshot()
-	raw, err := screenshotSrv.Take()
-	if err != nil {
-		log.Fatal(err)
-		return false
-	}
-	_ = raw
+	//raw, err := screenshotSrv.Take()
+	//if err != nil {
+	//	log.Fatal(err)
+	//	return false
+	//}
+	//_ = raw
 
 	img, format, err := image.Decode(raw)
 	if err != nil {
@@ -64,7 +62,7 @@ func Screenshot(name string) bool {
 	}
 
 	if name == "" {
-		name = dev.Properties().UDID + format
+		name = dev.Properties().UDID + "." + format
 	}
 	file, err := os.Create(path.Join(ImageDir, name))
 	if err != nil {
