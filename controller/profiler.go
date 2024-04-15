@@ -3,7 +3,9 @@ package controller
 import (
 	"fmt"
 	"github.com/airhandsome/go-ios/service"
-	"time"
+	"os"
+	"os/signal"
+	"syscall"
 )
 
 func ProfilerStart(udid, bundleId string, options []service.DataType) {
@@ -13,10 +15,11 @@ func ProfilerStart(udid, bundleId string, options []service.DataType) {
 	if err != nil {
 		return
 	}
-	timer := time.NewTimer(time.Second * 20)
+	signalChan := make(chan os.Signal, 1)
+	signal.Notify(signalChan, syscall.SIGTERM, syscall.SIGKILL)
 	for {
 		select {
-		case <-timer.C:
+		case <-signalChan:
 			ProfilerStop()
 			break
 		case d := <-data:

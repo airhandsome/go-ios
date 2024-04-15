@@ -13,7 +13,7 @@ var bundleId string
 var picName string
 
 func main() {
-	controller.ProfilerStart(udid, bundleId, []service.DataType{service.CPU})
+	//controller.ProfilerStart(udid, bundleId, []service.DataType{service.CPU, service.MEMORY, service.DISK, service.NETWORK})
 	var rootCmd = &cobra.Command{
 		Use:   "gos",
 		Short: "GOS (Go ios system) commands",
@@ -116,6 +116,8 @@ func main() {
 	appCmd.AddCommand(appListCmd, appLaunchCmd, appUninstallCmd, batteryCmd)
 	screenshotCmd.Flags().StringVarP(&picName, "path", "p", "", "screenshot name")
 	rootCmd.AddCommand(appCmd, mountCmd, screenshotCmd, perfCmd, devicesCmd, deviceInfoCmd, batteryCmd)
+	perfCmd.Flags().StringVarP(&bundleId, "bundleId", "b", "", "your bundleId")
+
 	//useless
 	rootCmd.AddCommand(runWdacmd, runXctestCmd, devicesListenCmd, remoteConnectCmd, remoteShareCmd)
 

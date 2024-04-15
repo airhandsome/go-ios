@@ -183,22 +183,18 @@ func (p *CpuAndMemoryProfiler) GenerateDefaultConfig(pid int, options ...string)
 	}
 	var sysAttrs []string
 	var procAttrs []string
-	if pid >= 0 {
-		procAttrs = append(procAttrs, "pid")
-	}
+	procAttrs = append(procAttrs, "pid")
 	for _, option := range options {
 		if option == "disk" {
 			sysAttrs = append(sysAttrs, p.GetDiskConfig()...)
 		} else if option == "network" {
 			sysAttrs = append(sysAttrs, p.GetNetworkConfig()...)
-		} else if option == "cpu" && pid >= 0 {
+		} else if option == "cpu" {
 
 			procAttrs = append(procAttrs, p.GetCpuConfig()...)
 		} else if option == "memory" {
 			sysAttrs = append(sysAttrs, p.GetMemoryConfig()...)
-			if pid >= 0 {
-				procAttrs = append(procAttrs, p.GetMemoryProcessConfig()...)
-			}
+			procAttrs = append(procAttrs, p.GetMemoryProcessConfig()...)
 		}
 	}
 	config["procAttrs"] = procAttrs
@@ -278,20 +274,12 @@ func (p *CpuAndMemoryProfiler) Start() (<-chan string, error) {
 			if !ok || len(dataArray) < 2 {
 				return
 			}
-			for _, data := range dataArray {
-				dataStr, err := json.Marshal(data)
-				if err != nil {
-					log.Println("marshal perf data error")
-					continue
-				}
-				outCh <- string(dataStr)
+			if p.pid != 0 {
+				p.parseProcessData(dataArray, outCh)
+				p.parseSystemData(dataArray, outCh)
+			} else {
+				p.parseSystemData(dataArray, outCh)
 			}
-			//if p.options.Pid != 0 {
-			//	c.parseProcessData(dataArray)
-			//	c.parseSystemData(dataArray)
-			//} else {
-			//	c.parseSystemData(dataArray)
-			//}
 		}
 	})
 	p.cancel = cancel
