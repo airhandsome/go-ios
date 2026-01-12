@@ -27,15 +27,17 @@ func setupImageMounterSrv(t *testing.T) {
 func Test_imageMounter_Images(t *testing.T) {
 	setupImageMounterSrv(t)
 
-	// Check iOS version first
-	info, err := dev.DeviceInfo()
-	if err == nil && info != nil {
-		if strings.Index(info.ProductVersion, "17.") >= 0 || strings.Index(info.ProductVersion, "18.") >= 0 {
-			t.Logf("📱 iOS %s detected - DeveloperDiskImage not needed", info.ProductVersion)
-			t.Log("✅ iOS 17+ uses Developer Mode instead of mounting images")
-			t.Log("💡 Enable: Settings → Privacy & Security → Developer Mode")
-			t.Skip("Skipping image mount test for iOS 17+")
-			return
+	// Check iOS version first via lockdown
+	version, err := dev.GetValue("", "ProductVersion")
+	if err == nil && version != nil {
+		if versionStr, ok := version.(string); ok {
+			if strings.Index(versionStr, "17.") >= 0 || strings.Index(versionStr, "18.") >= 0 {
+				t.Logf("📱 iOS %s detected - DeveloperDiskImage not needed", versionStr)
+				t.Log("✅ iOS 17+ uses Developer Mode instead of mounting images")
+				t.Log("💡 Enable: Settings → Privacy & Security → Developer Mode")
+				t.Skip("Skipping image mount test for iOS 17+")
+				return
+			}
 		}
 	}
 
@@ -53,15 +55,18 @@ func Test_imageMounter_Images(t *testing.T) {
 func Test_imageMounter_UploadImageAndMount(t *testing.T) {
 	setupImageMounterSrv(t)
 
-	// Check iOS version first
-	info, err := dev.DeviceInfo()
-	if err == nil && info != nil {
-		if strings.Index(info.ProductVersion, "17.") >= 0 || strings.Index(info.ProductVersion, "18.") >= 0 {
-			t.Logf("📱 iOS %s detected - DeveloperDiskImage not needed", info.ProductVersion)
-			t.Log("✅ iOS 17+ uses Developer Mode instead of mounting images")
-			t.Log("💡 Enable: Settings → Privacy & Security → Developer Mode")
-			t.Skip("Skipping image mount test for iOS 17+")
-			return
+	// Check iOS version first via lockdown
+	version, err := dev.GetValue("", "ProductVersion")
+	if err == nil && version != nil {
+		if versionStr, ok := version.(string); ok {
+			if strings.Index(versionStr, "17.") >= 0 || strings.Index(versionStr, "18.") >= 0 {
+				t.Logf("📱 iOS %s detected - DeveloperDiskImage not needed", versionStr)
+				t.Log("✅ iOS 17+ uses Developer Mode instead of mounting images")
+				t.Log("💡 Enable: Settings → Privacy & Security → Developer Mode")
+				t.Skip("Skipping image mount test for iOS 17+")
+				return
+			}
+			t.Logf("iOS %s detected - will attempt to mount DeveloperDiskImage", versionStr)
 		}
 	}
 
