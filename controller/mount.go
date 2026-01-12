@@ -27,8 +27,16 @@ func Mount(udid string) error {
 		log.Println("Get device info error")
 		return err
 	}
-	if strings.Index(info.ProductVersion, "17.") > 0 {
-		return errors.New("iOS 17.x is not supported yet")
+	if strings.Index(info.ProductVersion, "17.") >= 0 || strings.Index(info.ProductVersion, "18.") >= 0 {
+		// iOS 17+ doesn't use DeveloperDiskImage, uses Developer Mode instead
+		fmt.Println("📱 iOS 17+ detected!")
+		fmt.Println("⚠️  iOS 17+ no longer requires DeveloperDiskImage.dmg")
+		fmt.Println("✅ Solution: Enable 'Developer Mode' on your device:")
+		fmt.Println("   Settings → Privacy & Security → Developer Mode → ON")
+		fmt.Println("   Then restart your device.")
+		fmt.Println("")
+		fmt.Println("💡 After enabling Developer Mode, you can use app launch and other features directly.")
+		return nil // Not an error, just no need to mount
 	} else {
 		if signatures, err := dev.Images(); err == nil && len(signatures) > 0 {
 			fmt.Println("DeveloperImage already mounted")
