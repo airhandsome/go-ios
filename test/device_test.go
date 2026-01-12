@@ -173,3 +173,39 @@ func Test_device_InstallationProxyBrowse(t *testing.T) {
 		t.Logf("%#v", l)
 	}
 }
+
+func Test_device_AppLaunch_FCM(t *testing.T) {
+	setupDevice(t)
+
+	bundleID := "com.aa.bb.cc"
+	
+	t.Logf("Attempting to launch %s", bundleID)
+	
+	pid, err := dev.AppLaunch(bundleID)
+	if err != nil {
+		t.Fatalf("Failed to launch app: %v", err)
+	}
+	
+	t.Logf("✅ Successfully launched %s with PID: %d", bundleID, pid)
+	
+	// Wait a bit to let the app start
+	time.Sleep(2 * time.Second)
+	
+	// Optional: Verify the app is running
+	processes, err := dev.AppRunningProcesses()
+	if err == nil {
+		for _, p := range processes {
+			if p.Pid == pid {
+				t.Logf("App is running: %s (PID: %d)", p.Name, p.Pid)
+				break
+			}
+		}
+	}
+	
+	// Optional: Kill the app after test
+	// Uncomment if you want to automatically close the app after launching
+	// err = dev.AppKill(pid)
+	// if err != nil {
+	// 	t.Logf("Warning: Failed to kill app: %v", err)
+	// }
+}
